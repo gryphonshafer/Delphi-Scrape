@@ -1,0 +1,15 @@
+requires 'exact';
+requires 'Carp';
+requires 'Digest::SHA';
+requires 'Date::Parse';
+requires 'File::Find';
+requires 'File::Path';
+requires 'FindBin';
+requires 'IO::Socket::SSL';
+requires 'Mojolicious';
+requires 'Readonly::Tiny';
+requires 'Time::HiRes';
+required 'Try::Tiny';
+requires 'Util::CommandLine';
+requires 'WWW::Mechanize::PhantomJS';
+requires 'YAML::XS';

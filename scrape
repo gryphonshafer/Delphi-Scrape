@@ -1,0 +1,201 @@
+#!/usr/bin/env perl
+use exact;
+
+use Digest::SHA 'sha1_hex';
+use File::Find 'find';
+use File::Path 'make_path';
+use Util::CommandLine qw( options pod2usage );
+use YAML::XS qw( DumpFile LoadFile );
+
+use FindBin;
+use lib "$FindBin::Bin";
+use Delphi;
+
+my $settings = options( qw(
+    username|user|u=s password|passwd|pass|p=s forum|f=s store|s=s lag|l=s refresh|r=s
+) );
+
+# input validation
+pod2usage( '-verbose' => 1 ) if ( $settings->{'help'} );
+pod2usage(
+    '-exitstatus' => 2,
+    '-verbose'    => 0,
+    '-msg'        => 'Not all required fields properly defined',
+) if ( scalar grep { not (
+    defined $settings->{$_} and length $settings->{$_}
+) } qw( username password forum ) );
+
+$SIG{__WARN__} = sub {
+    die join( "\n",
+        'Something unexpected happened, likely a temporary problem with Delphi.',
+        'Wait a few seconds and try again.',
+        'The technical details are:',
+        @_,
+    ) . "\n";
+};
+
+$settings->{lag}   //= 1.5;
+$settings->{store} //= 'store';
+
+make_path( $settings->{store} . '/' . $_ ) for ( qw( threads profiles files ) );
+
+if ( $settings->{refresh} and $settings->{refresh} =~ /\w/ ) {
+    my @mtimes;
+    find( sub { push( @mtimes, ( stat($_) )[9] ) if ( -f $_ ) }, $settings->{store} . '/threads' );
+    my ($last_mtime) = sort { $b <=> $a } @mtimes;
+    $settings->{refresh} = int( ( time() - $last_mtime ) / 60 / 60 / 24 + 1 );
+}
+
+my $delphi = Delphi->new($settings);
+process( $settings->{refresh} );
+
+sub process ( $update_days = 0 ) {
+    for my $thread_id (
+        ($update_days)
+            ? @{ $delphi->get_updated_list($update_days) }
+            : ( reverse 1 .. $delphi->most_recent_thread )
+    ) {
+        next if ( -f $settings->{store} . '/threads/' . $thread_id . '.yaml' and not $update_days );
+        say "Thread: $thread_id";
+        my $thread_data = $delphi->thread_data($thread_id);
+
+        unless ($thread_data) {
+            say "  Thread $thread_id appears to have no discussions; skipping";
+            DumpFile( $settings->{store} . '/threads/' . $thread_id . '.yaml', $thread_data );
+            next;
+        }
+
+        my ( $old_thread_data, @old_thread_ids );
+        if ($update_days) {
+            ( my $simple_thread_id = $thread_id ) =~ s/\.\d+//;
+            if ( -f $settings->{store} . '/threads/' . $simple_thread_id . '.yaml' ) {
+                $old_thread_data = LoadFile( $settings->{store} . '/threads/' . $simple_thread_id . '.yaml' );
+                @old_thread_ids  = map { $_->{id} } @{ $old_thread_data->{messages} };
+            }
+        }
+
+        for my $msg ( @{ $thread_data->{messages} } ) {
+            if ($update_days) {
+                if ( grep { $msg->{id} eq $_ } @old_thread_ids ) {
+                    next;
+                }
+                else {
+                    push ( @{ $old_thread_data->{messages} }, $msg );
+                }
+            }
+
+            say "  Message: $msg->{id}";
+
+            unless ( -f $settings->{store} . '/profiles/' . $msg->{from} . '.yaml' ) {
+                say "    Profile: $msg->{from}";
+                DumpFile(
+                    $settings->{store} . '/profiles/' . $msg->{from} . '.yaml',
+                    $delphi->profile_data( $msg->{from} ),
+                );
+            }
+
+            unless ( $msg->{to} eq 'All' or -f $settings->{store} . '/profiles/' . $msg->{to} . '.yaml' ) {
+                say "    Profile: $msg->{to}";
+                DumpFile(
+                    $settings->{store} . '/profiles/' . $msg->{to} . '.yaml',
+                    $delphi->profile_data( $msg->{to} ),
+                );
+            }
+
+            for (
+                grep { not -f $_->[1] }
+                map {
+                    my $file = $_;
+                    my $ext  = ( $file =~ s|(\.[^\./]+)$|| ) ? $1 : '';
+
+                    [ $_, $settings->{store} . '/files/' . sha1_hex($file) . $ext ];
+                }
+                @{ $msg->{images} }, map { $_->{href} } @{ $msg->{attachments} }
+            ) {
+                say "    File: $_->[0]";
+                my $code = $delphi->pull_binary(@$_);
+                say "      Code: $code" if ( $code != 200 );
+            }
+        }
+
+        $thread_data->{messages} = $old_thread_data->{messages} if ($update_days);
+        DumpFile( $settings->{store} . '/threads/' . $thread_id . '.yaml', $thread_data );
+    }
+}
+
+=head1 NAME
+
+scrape - Scrape content from Delphi message forums
+
+=head1 SYNOPSIS
+
+    scrape [options] [file ...]
+
+    Options:
+        -u|user|username          Delphi account username (required)
+        -p|pass|passwd|password   Delphi account password (required)
+        -f|forum                  Delphi forum codename (required)
+        -s|store                  location to store content (default: "store")
+        -l|lag                    seconds as float to lag before primary pages
+        -r|refresh                sets days since last run for refresh
+        -h|help                   brief help message
+        -m|man                    full documentation
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-username>
+
+Delphi username to access the forum. Required.
+
+=item B<-password>
+
+Delphi password to access the forum. Required.
+
+=item B<-forum>
+
+Delphi forum codename. It's the name that immediately precedes "/messages" in
+the forum URL. Required.
+
+=item B<-store>
+
+Directory location where content will be stored. By default, it's in a "~/store"
+directory, relative to the current working directory. If any directory or
+directory tree doesn't exist, it'll be created.
+
+=item B<-lag>
+
+This is a floating-point number representing the secconds to wait before
+fetching any "primary" page. A "primary" page is either a thread page or a
+profile page. (Requests for images and attachments don't lag.)
+
+By default, this value is: 1.5
+
+=item B<-refresh>
+
+This is the refresh range, in numbers of days. If left undefined or set to 0,
+which is the default, the program will pull new threads (or threads it hasn't
+yet pulled). If defined as some number of days, the program will do a refresh of
+threads with posts more recent that those number of days.
+
+If you set refresh to "a" or "auto" or so on, then the number of days will be
+calculated from the most recent last modified date of saved thread YAML data
+files.
+
+=item B<-help>
+
+Print a brief help message and exits.
+
+=item B<-man>
+
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+This program will scape content from Delphi message forums and store that data
+in a standard data format.
+
+=cut
