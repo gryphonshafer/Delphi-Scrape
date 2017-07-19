@@ -12,7 +12,7 @@ use lib "$FindBin::Bin";
 use Delphi;
 
 my $settings = options( qw(
-    username|user|u=s password|passwd|pass|p=s forum|f=s store|s=s lag|l=s refresh|r=s
+    username|user|u=s password|passwd|pass|p=s forum|f=s store|s=s lag|l=f refresh|r=s
 ) );
 
 # input validation
@@ -39,7 +39,7 @@ $settings->{store} //= 'store';
 
 make_path( $settings->{store} . '/' . $_ ) for ( qw( threads profiles files ) );
 
-if ( $settings->{refresh} and $settings->{refresh} =~ /\w/ ) {
+if ( $settings->{refresh} and $settings->{refresh} =~ /[A-z]/ ) {
     my @mtimes;
     find( sub { push( @mtimes, ( stat($_) )[9] ) if ( -f $_ ) }, $settings->{store} . '/threads' );
     my ($last_mtime) = sort { $b <=> $a } @mtimes;
