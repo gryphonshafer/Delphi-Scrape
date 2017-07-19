@@ -55,9 +55,12 @@ sub process ( $update_days = 0 ) {
             ? @{ $delphi->get_updated_list($update_days) }
             : ( reverse 1 .. $delphi->most_recent_thread )
     ) {
+        my $full_thread_id = $thread_id;
+        $thread_id =~ s/\.\d+//;
+
         next if ( -f $settings->{store} . '/threads/' . $thread_id . '.yaml' and not $update_days );
         say "Thread: $thread_id";
-        my $thread_data = $delphi->thread_data($thread_id);
+        my $thread_data = $delphi->thread_data($full_thread_id);
 
         unless ($thread_data) {
             say "  Thread $thread_id appears to have no discussions; skipping";
@@ -67,9 +70,8 @@ sub process ( $update_days = 0 ) {
 
         my ( $old_thread_data, @old_thread_ids );
         if ($update_days) {
-            ( my $simple_thread_id = $thread_id ) =~ s/\.\d+//;
-            if ( -f $settings->{store} . '/threads/' . $simple_thread_id . '.yaml' ) {
-                $old_thread_data = LoadFile( $settings->{store} . '/threads/' . $simple_thread_id . '.yaml' );
+            if ( -f $settings->{store} . '/threads/' . $thread_id . '.yaml' ) {
+                $old_thread_data = LoadFile( $settings->{store} . '/threads/' . $thread_id . '.yaml' );
                 @old_thread_ids  = map { $_->{id} } @{ $old_thread_data->{messages} };
             }
         }
