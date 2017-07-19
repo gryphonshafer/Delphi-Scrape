@@ -9,7 +9,7 @@ requires 'IO::Socket::SSL';
 requires 'Mojolicious';
 requires 'Readonly::Tiny';
 requires 'Time::HiRes';
-required 'Try::Tiny';
+requires 'Try::Tiny';
 requires 'Util::CommandLine';
 requires 'WWW::Mechanize::PhantomJS';
 requires 'YAML::XS';
