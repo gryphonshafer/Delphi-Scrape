@@ -144,7 +144,7 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
         sleep 1;
     }
     die "Failed to find topic summary in page after 3 attempts\n" unless ($msg_unsubj);
-    $msg_unsubj->all_text =~ /(?<folder>[\w ]+)\s*\-\s*(?<topic>[\w ]*?\w)\s*\((?<views>\d+)/;
+    $msg_unsubj->all_text =~ /(?<folder>.+?)\s*\-\s*(?<topic>.*?\w)\s*\((?<views>\d+)/;
 
     my %metadata  = %+;
     my $total_msg = 0;
