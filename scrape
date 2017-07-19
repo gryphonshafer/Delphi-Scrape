@@ -106,7 +106,7 @@ sub process ( $update_days = 0 ) {
                 grep { not -f $_->[1] }
                 map {
                     my $file = $_;
-                    my $ext  = ( $file =~ s|(\.[^\./]+)$|| ) ? $1 : '';
+                    my $ext  = ( $file =~ s|(\.[^\./\?\&=\-]{1,5})$|| ) ? $1 : '';
 
                     [ $_, $settings->{store} . '/files/' . sha1_hex($file) . $ext ];
                 }
