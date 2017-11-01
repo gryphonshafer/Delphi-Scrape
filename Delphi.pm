@@ -5,6 +5,7 @@ use Carp 'croak';
 use Date::Parse 'str2time';
 use IO::Socket::SSL;
 use Mojo::DOM;
+use Mojo::URL;
 use Mojo::UserAgent;
 use Readonly::Tiny 'Readonly';
 use Time::HiRes 'sleep';
@@ -291,17 +292,29 @@ sub pull_binary ( $self, $url, $filename ) {
 sub get_updated_list ( $self, $days = 7 ) {
     $self->login;
 
-    my $links = $self->{ua}
-        ->get("$forums_url/n/find/results.asp?webtag=lakeamphibs&o=newest&Be=0&Af=$days")
-        ->result->dom->find('a');
+    my $this_url = $forums_url . '/n/find/results.asp?webtag=' . $self->{forum} . '&o=newest&af=' . $days;
+    my %ids;
 
-    my %ids = map { @$_ } @{
-        $links->map( attr => 'href' )->grep( sub { $_ and /\bmsg=/ } )
-            ->map( sub { /\bmsg=(\d+)\.(\d+)/; [ $1, $2 ] } )
-            ->sort( sub { $b->[0] <=> $a->[0] or $b->[1] <=> $a->[1] } )
-            ->map( sub { [ $_->[0], $_->[0] . '.' . $_->[1] ] } )
-            ->to_array
-    };
+    while ($this_url) {
+        my $links = $self->{ua}->get($this_url)->result->dom->find('a');
+
+        my $next = $links->grep( sub {
+            my $span = $_->at('span');
+            $span and $span->text eq 'Next 50';
+        } )->first;
+
+        $this_url = ($next)
+            ? Mojo::URL->new( $next->attr('href') )->to_abs( Mojo::URL->new($this_url) )
+            : undef;
+
+        %ids = ( %ids, map { @$_ } @{
+            $links->map( attr => 'href' )->grep( sub { $_ and /\bmsg=/ } )
+                ->map( sub { /\bmsg=(\d+)\.(\d+)/; [ $1, $2 ] } )
+                ->sort( sub { $b->[0] <=> $a->[0] or $b->[1] <=> $a->[1] } )
+                ->map( sub { [ $_->[0], $_->[0] . '.' . $_->[1] ] } )
+                ->to_array
+        } );
+    }
 
     return [ map { $ids{$_} } sort { $b <=> $a } keys %ids ];
 }
