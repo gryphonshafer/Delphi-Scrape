@@ -42,6 +42,7 @@ forum might have a base URL that looks like this:
 
 A typical first-time run of the application might look like this:
 
+    export OPENSSL_CONF=/etc/ssl/
     ./scrape -f FORUMNAME -u USERNAME -p PASSWORD
 
 You can safely rerun this command if for whatever reason the application stops
