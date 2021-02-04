@@ -9,7 +9,6 @@ use Mojo::URL;
 use Mojo::UserAgent;
 use Readonly::Tiny 'Readonly';
 use Time::HiRes 'sleep';
-use Try::Tiny;
 use WWW::Mechanize::PhantomJS;
 
 Readonly my $forums_url   => 'http://forums.delphiforums.com';
@@ -112,14 +111,14 @@ sub msgs_dom ( $self, $current_thread = $self->most_recent_thread, $message_numb
     my $msg = ( $current_thread =~ /\./ ) ? $current_thread : "$current_thread.$message_number";
 
     # visit page of first message in thread
-    my @err;
+    my $err;
     try {
         $self->{mech}->get("$forums_url/$self->{forum}/messages?msg=$msg");
     }
     catch {
-        @err = @_;
+        $err = $_ || $@;
     };
-    return if (@err);
+    return if ($err);
 
     # select the messages frame
     $self->{driver}->switch_to_frame('LowerFrame');
