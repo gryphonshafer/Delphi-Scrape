@@ -1,7 +1,7 @@
 requires 'Carp', '1.50';
 requires 'Date::Parse', '2.33';
 requires 'Digest::SHA', '6.02';
-requires 'File::Find', '1.37';
+requires 'File::Find';
 requires 'File::Path', '2.18';
 requires 'FindBin', '1.52';
 requires 'IO::Socket::SSL', '2.069';
