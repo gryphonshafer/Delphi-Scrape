@@ -115,10 +115,9 @@ sub msgs_dom ( $self, $current_thread = $self->most_recent_thread, $message_numb
     try {
         $self->{mech}->get("$forums_url/$self->{forum}/messages?msg=$msg");
     }
-    catch {
-        $err = $_ || $@;
-    };
-    return if ($err);
+    catch ($e) {
+        return;
+    }
 
     # select the messages frame
     $self->{driver}->switch_to_frame('LowerFrame');
@@ -275,8 +274,9 @@ sub pull_binary ( $self, $url, $filename ) {
 
     my $result;
     try {
-        $result = $self->{ua}->get($url)->result
-    };
+        $result = $self->{ua}->get($url)->result;
+    }
+    catch {}
 
     if ( $result and $result->code == 200 ) {
         open( my $output, '>', $filename ) or die "$!: $filename\n";
