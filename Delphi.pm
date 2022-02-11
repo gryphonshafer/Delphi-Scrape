@@ -11,8 +11,8 @@ use Readonly::Tiny 'Readonly';
 use Time::HiRes 'sleep';
 use WWW::Mechanize::PhantomJS;
 
-Readonly my $forums_url   => 'http://forums.delphiforums.com';
-Readonly my $profiles_url => 'http://profiles.delphiforums.com';
+Readonly my $forums_url   => 'https://forums.delphiforums.com';
+Readonly my $profiles_url => 'https://profiles.delphiforums.com';
 
 sub new ( $package, $self ) {
     for ( qw( forum username password ) ) {
@@ -41,6 +41,9 @@ sub login ($self) {
     unless ( $self->{logged_in} ) {
         # visit initial page
         $self->{mech}->get("$forums_url/$self->{forum}");
+
+        $self->{driver}->switch_to_frame('BrandFrame');
+        $self->{mech}->follow_link( text_contains => '(login)' );
 
         # fill out and submit login form
         $self->{mech}->by_id( 'lgnForm_username', single => 1 )->clear;
