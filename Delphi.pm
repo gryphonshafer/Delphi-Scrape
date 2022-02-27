@@ -153,59 +153,65 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
     my @messages;
 
     while (1) {
-        push( @messages, map {
+        push( @messages, grep { defined } map {
             my $msg = $_;
             $total_msg = $1 if ( not $total_msg and $msg->at('td.msgNum')->all_text =~ /\(\d+ of (\d+)\)/ );
 
             ( my $date = $msg->at('td.msgDate')->all_text ) =~ s/\s+$//;
             $date =~ s/-/ /g;
-            $date = localtime( str2time($date) );
 
-            $msg->at('table.df-msginner td.wintiny')->all_text =~ m|
-                (?<id>\d+\.\d+)\s*
-                in\s*reply\s*to\s*
-                (?<in_reply_to>\d+\.\d+)
-            |x;
-            my %ids = %+;
-            $ids{id} //= ( $current_thread =~ /\./ ) ? $current_thread : "$current_thread.1";
+            if ( $date and $date eq 'Sponsored Message' ) {
+                undef;
+            }
+            else {
+                $date = localtime( str2time($date) );
 
-            my $body = $msg->at('td.msgtxt div.os-msgbody');
-            return unless ($body);
+                $msg->at('table.df-msginner td.wintiny')->all_text =~ m|
+                    (?<id>\d+\.\d+)\s*
+                    in\s*reply\s*to\s*
+                    (?<in_reply_to>\d+\.\d+)
+                |x;
+                my %ids = %+;
+                $ids{id} //= ( $current_thread =~ /\./ ) ? $current_thread : "$current_thread.1";
 
-            my $images = $body->find('img')->grep( sub { $_->attr('src') } )->map( sub {
-                my $src = $_->attr('src');
-                unless ( $src =~ m|^\w+://| ) {
-                    $src = $forums_url . $_->attr('src');
-                    $_->attr( 'src' => $src );
-                }
-                $src;
-            } )->to_array;
+                my $body = $msg->at('td.msgtxt div.os-msgbody');
+                return unless ($body);
 
-            ( my $from = $msg->at('td.msgFname')->all_text ) =~ s/(^\s+|\s+$)//g;
-            ( my $to   = $msg->at('td.msgTname')->all_text ) =~ s/(^\s+|\s+$)//g;
-            $from =~ s/\s/ /g;
-            $to   =~ s/\s/ /g;
+                my $images = $body->find('img')->grep( sub { $_->attr('src') } )->map( sub {
+                    my $src = $_->attr('src');
+                    unless ( $src =~ m|^\w+://| ) {
+                        $src = $forums_url . $_->attr('src');
+                        $_->attr( 'src' => $src );
+                    }
+                    $src;
+                } )->to_array;
 
-            +{
-                %ids,
-                date        => $date,
-                from        => $from,
-                to          => $to,
-                content     => $body->content,
-                images      => $images,
-                attachments => [
-                    map {
-                        ( my $size = $_->text ) =~ s/(^\s+|\s+$)//g;
-                        my $link = $_->at('a');
+                ( my $from = $msg->at('td.msgFname')->all_text ) =~ s/(^\s+|\s+$)//g;
+                ( my $to   = $msg->at('td.msgTname')->all_text ) =~ s/(^\s+|\s+$)//g;
+                $from =~ s/\s/ /g;
+                $to   =~ s/\s/ /g;
 
-                        +{
-                            name => $link->at('span.text')->text,
-                            href => $forums_url . $link->attr('href'),
-                            size => $size,
-                        };
-                    } $msg->find('li.os-attachment')->each
-                ],
-            };
+                +{
+                    %ids,
+                    date        => $date,
+                    from        => $from,
+                    to          => $to,
+                    content     => $body->content,
+                    images      => $images,
+                    attachments => [
+                        map {
+                            ( my $size = $_->text ) =~ s/(^\s+|\s+$)//g;
+                            my $link = $_->at('a');
+
+                            +{
+                                name => $link->at('span.text')->text,
+                                href => $forums_url . $link->attr('href'),
+                                size => $size,
+                            };
+                        } $msg->find('li.os-attachment')->each
+                    ],
+                };
+            }
         } $msgs->find('table')->grep( sub { $_->attr('id') and $_->attr('id') =~ /^df_msg_\d+/ } )->each );
 
         # decide to loop if there's a "Keep Reading" button with a message ID

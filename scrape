@@ -88,18 +88,20 @@ sub process ( $update_days = 0 ) {
 
             say "  Message: $msg->{id}";
 
-            unless ( -f $settings->{store} . '/profiles/' . $msg->{from} . '.yaml' ) {
+            ( my $profile = $msg->{from} ) =~ s|/|_|g;
+            unless ( -f $settings->{store} . '/profiles/' . $profile . '.yaml' ) {
                 say "    Profile: $msg->{from}";
                 DumpFile(
-                    $settings->{store} . '/profiles/' . $msg->{from} . '.yaml',
+                    $settings->{store} . '/profiles/' . $profile . '.yaml',
                     $delphi->profile_data( $msg->{from} ),
                 );
             }
 
-            unless ( $msg->{to} eq 'All' or -f $settings->{store} . '/profiles/' . $msg->{to} . '.yaml' ) {
+            ( $profile = $msg->{to} ) =~ s|/|_|g;
+            unless ( $msg->{to} eq 'All' or -f $settings->{store} . '/profiles/' . $profile . '.yaml' ) {
                 say "    Profile: $msg->{to}";
                 DumpFile(
-                    $settings->{store} . '/profiles/' . $msg->{to} . '.yaml',
+                    $settings->{store} . '/profiles/' . $profile . '.yaml',
                     $delphi->profile_data( $msg->{to} ),
                 );
             }
@@ -109,7 +111,7 @@ sub process ( $update_days = 0 ) {
                 map {
                     my $file = $_;
                     my $ext  = ( $file =~ s|(\.[^\./\?\&=\-]{1,5})$|| ) ? $1 : '';
-
+                    chomp $ext;
                     [ $_, $settings->{store} . '/files/' . sha1_hex($file) . $ext ];
                 }
                 @{ $msg->{images} }, map { $_->{href} } @{ $msg->{attachments} }
