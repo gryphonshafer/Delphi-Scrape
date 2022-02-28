@@ -159,12 +159,13 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
 
             ( my $date = $msg->at('td.msgDate')->all_text ) =~ s/\s+$//;
             $date =~ s/-/ /g;
+            $date = str2time($date);
 
-            if ( $date and $date eq 'Sponsored Message' ) {
+            unless ($date) {
                 undef;
             }
             else {
-                $date = localtime( str2time($date) );
+                $date = localtime($date);
 
                 $msg->at('table.df-msginner td.wintiny')->all_text =~ m|
                     (?<id>\d+\.\d+)\s*
