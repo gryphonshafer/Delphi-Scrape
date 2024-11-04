@@ -286,7 +286,7 @@ sub pull_binary ( $self, $url, $filename ) {
     try {
         $result = $self->{ua}->get($url)->result;
     }
-    catch {}
+    catch ($e) {}
 
     if ( $result and $result->code == 200 ) {
         open( my $output, '>', $filename ) or die "$!: $filename\n";
