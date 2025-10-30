@@ -62,3 +62,22 @@ program will do a refresh of threads with posts more recent that those number of
 days. If you set refresh to "a" or "auto" or so on, then the number of days will
 be calculated from the most recent last modified date of saved thread YAML data
 files.
+
+## Offline Site Export
+
+Once you have YAML threads, profile snapshots, and binaries under `store/`, you
+can turn them into a browsable static archive that mimics the forum layout.
+
+    python3 tools/export_site.py --store store --output site_export --forum-title "Your Forum Title"
+
+The command reads from `store/threads`, `store/profiles`, and `store/files`,
+writes HTML into `site_export/`, and copies any captured attachments or inline
+images so they resolve locally. Regenerate the export after each scrape refresh
+to keep the HTML in sync.
+
+To preview the archive, open `site_export/index.html` in a browser or run:
+
+    python3 -m http.server 8000 --directory site_export
+
+If Python cannot locate PyYAML, install it with `pip install pyyaml` before
+launching the exporter.

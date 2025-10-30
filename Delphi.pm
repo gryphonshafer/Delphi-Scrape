@@ -5,6 +5,7 @@ use Carp 'croak';
 use Date::Parse 'str2time';
 use IO::Socket::SSL;
 use Mojo::DOM;
+use Mojo::JSON 'decode_json';
 use Mojo::URL;
 use Mojo::UserAgent;
 use Readonly::Tiny 'Readonly';
@@ -13,6 +14,8 @@ use WWW::Mechanize::PhantomJS;
 
 Readonly my $forums_url   => 'https://forums.delphiforums.com';
 Readonly my $profiles_url => 'https://profiles.delphiforums.com';
+
+my %archive_cache;
 
 sub new ( $package, $self ) {
     for ( qw( forum username password ) ) {
@@ -146,9 +149,26 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
         sleep 1;
     }
     die "Failed to find topic summary in page after 3 attempts\n" unless ($msg_unsubj);
-    $msg_unsubj->all_text =~ /(?<folder>.+?)\s*\-\s*(?<topic>.*?\w)\s*\((?<views>\d+)/;
+    my $summary_text = $msg_unsubj->all_text // q{};
+    $summary_text =~ s/\s+/ /g;
+    $summary_text =~ s/(^\s+|\s+$)//g;
 
-    my %metadata  = %+;
+    my %metadata;
+    if (
+        $summary_text =~ /
+            (?<folder>.+?)
+            (?:\s+-\s+(?<topic>.*?\S))?
+            \s*\(
+            (?<views>\d+)
+        /x
+    ) {
+        %metadata = %+;
+        $metadata{folder} =~ s/(^\s+|\s+$)//g if ( defined $metadata{folder} );
+        $metadata{topic}  =~ s/(^\s+|\s+$)//g if ( defined $metadata{topic} );
+    }
+    else {
+        %metadata = ();
+    }
     my $total_msg = 0;
     my @messages;
 
@@ -175,10 +195,20 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
                 my %ids = %+;
                 $ids{id} //= ( $current_thread =~ /\./ ) ? $current_thread : "$current_thread.1";
 
-                my $body = $msg->at('td.msgtxt div.os-msgbody');
-                return unless ($body);
+                my $body_container = $msg->at('td.msgtxt');
+                return unless ($body_container);
 
-                my $images = $body->find('img')->grep( sub { $_->attr('src') } )->map( sub {
+                my $body       = $body_container->at('div.os-msgbody');
+                my $poll_table = $body_container->at('table.polltable');
+                my $poll_html  = $poll_table ? $poll_table->to_string : undef;
+
+                my $content_html = q{};
+                $content_html .= $body->content if ($body);
+                $content_html .= $poll_html     if ( defined $poll_html and ( not $body or index( $content_html, $poll_html ) == -1 ) );
+                $content_html  = $body_container->content if ( $content_html eq q{} );
+
+                my $scope_for_images = $body // $poll_table // $body_container;
+                my $images = $scope_for_images->find('img')->grep( sub { $_->attr('src') } )->map( sub {
                     my $src = $_->attr('src');
                     unless ( $src =~ m|^\w+://| ) {
                         $src = $forums_url . $_->attr('src');
@@ -187,17 +217,101 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
                     $src;
                 } )->to_array;
 
-                ( my $from = $msg->at('td.msgFname')->all_text ) =~ s/(^\s+|\s+$)//g;
-                ( my $to   = $msg->at('td.msgTname')->all_text ) =~ s/(^\s+|\s+$)//g;
-                $from =~ s/\s/ /g;
-                $to   =~ s/\s/ /g;
+                my $poll;
+                if ($poll_table) {
+                    my $question = $poll_table->at('span.winbig');
+                    my $options_table = $poll_table->find('table')->first;
+                    my @options;
+
+                    if ($options_table) {
+                        my @rows = $options_table->find('tr')->each;
+                        for ( my $i = 0; $i < @rows; $i++ ) {
+                            my $row = $rows[$i];
+                            next unless ( $row and ref $row and $row->can('at') );
+                            my $label_cell = $row->at('td');
+                            next unless ($label_cell);
+
+                            my $label = $label_cell->all_text;
+                            $label =~ s/\s+/ /g;
+                            $label =~ s/(^\s+|\s+$)//g;
+                            next unless length $label;
+
+                            my $bar_class;
+                            if ( my $bar_cell = $row->find('td')->grep( sub {
+                                my $class = $_->attr('class') // q{};
+                                $class =~ /\bpollbar\d+\b/;
+                            } )->first ) {
+                                my $class_attr = $bar_cell->attr('class') // q{};
+                                ($bar_class) = $class_attr =~ /(pollbar\d+)/;
+                                $bar_class //= $class_attr;
+                            }
+
+                            my $stats_row = ( $i + 1 < @rows ) ? $rows[ $i + 1 ] : undef;
+                            my ( $votes, $percent );
+                            if ($stats_row) {
+                                my $stats_text = ( $stats_row->can('all_text') ) ? $stats_row->all_text : q{};
+                                $stats_text =~ s/\s+/ /g;
+                                if ( $stats_text =~ /([\d,]+)\s*votes/i ) {
+                                    ( $votes = $1 ) =~ s/,//g;
+                                }
+                                if ( $stats_text =~ /\(([\d.]+)%\)/ ) {
+                                    $percent = $1 + 0;
+                                }
+                                $i++;
+                            }
+
+                            push(
+                                @options,
+                                +{
+                                    ( length $label ? ( label => $label ) : () ),
+                                    ( defined $votes ? ( votes => +$votes ) : () ),
+                                    ( defined $percent ? ( percent => $percent ) : () ),
+                                    ( $bar_class ? ( bar_class => $bar_class ) : () ),
+                                }
+                            );
+                        }
+                    }
+
+                    my $details_cell = $poll_table->find('td.msgtxt')->last;
+                    my ( $total_votes, $status_text, $details_html );
+                    if ($details_cell) {
+                        my $details_text = $details_cell->all_text // q{};
+                        $details_text =~ s/\s+/ /g;
+                        $details_text =~ s/(^\s+|\s+$)//g;
+                        if ( $details_text =~ /([\d,]+)\s+people\s+voted/i ) {
+                            ( $total_votes = $1 ) =~ s/,//g;
+                            $total_votes += 0;
+                        }
+                        $status_text = $details_text if ($details_text);
+                        $details_html = $details_cell->content;
+                    }
+
+                    $poll = +{
+                        ( $question    ? ( question    => $question->all_text =~ s/(^\s+|\s+$)//gr ) : () ),
+                        ( @options     ? ( options     => \@options ) : () ),
+                        ( defined $total_votes ? ( total_votes => $total_votes ) : () ),
+                        ( $details_html ? ( details_html => $details_html ) : () ),
+                        ( $status_text  ? ( details_text => $status_text )  : () ),
+                    };
+                    $poll = undef unless ( $poll and keys %$poll );
+                }
+
+                my $from = $msg->at('td.msgFname')->all_text // q{};
+                $from =~ s/\s+/ /g;
+                $from =~ s/(^\s+|\s+$)//g;
+                my $from_unread = $from =~ s/\s+unread$//i ? 1 : 0;
+
+                my $to = $msg->at('td.msgTname')->all_text // q{};
+                $to =~ s/\s+/ /g;
+                $to =~ s/(^\s+|\s+$)//g;
+                my $to_unread = $to =~ s/\s+unread$//i ? 1 : 0;
 
                 +{
                     %ids,
                     date        => $date,
                     from        => $from,
                     to          => $to,
-                    content     => $body->content,
+                    content     => $content_html,
                     images      => $images,
                     attachments => [
                         map {
@@ -211,6 +325,9 @@ sub thread_data ( $self, $current_thread = $self->most_recent_thread ) {
                             };
                         } $msg->find('li.os-attachment')->each
                     ],
+                    ( $from_unread ? ( from_status => 'unread' ) : () ),
+                    ( $to_unread   ? ( to_status   => 'unread' ) : () ),
+                    ( $poll ? ( poll => $poll ) : () ),
                 };
             }
         } $msgs->find('table')->grep( sub { $_->attr('id') and $_->attr('id') =~ /^df_msg_\d+/ } )->each );
@@ -283,19 +400,75 @@ sub pull_binary ( $self, $url, $filename ) {
     $self->login;
 
     my $result;
+    my $used_archive;
     try {
         $result = $self->{ua}->get($url)->result;
     }
     catch ($e) {}
+
+    if ( not ( $result and $result->code == 200 ) ) {
+        if ( not $result or $result->code =~ /^40[34]$/ ) {
+            if ( my $archive_url = $self->_archive_snapshot($url) ) {
+                try {
+                    my $archive_result = $self->{ua}->get($archive_url)->result;
+                    if ( $archive_result and $archive_result->code == 200 ) {
+                        $result       = $archive_result;
+                        $used_archive = 1;
+                    }
+                    elsif ($archive_result) {
+                        $result = $archive_result;
+                    }
+                }
+                catch ($e) {}
+            }
+        }
+    }
 
     if ( $result and $result->code == 200 ) {
         open( my $output, '>', $filename ) or die "$!: $filename\n";
         binmode( $output, ':raw' );
         print $output $result->body;
         close $output;
+        print "      Recovered via Internet Archive\n" if ($used_archive);
     }
 
     return ($result) ? $result->code : 0;
+}
+
+sub _archive_snapshot ( $self, $url ) {
+    return $archive_cache{$url} if ( exists $archive_cache{$url} );
+
+    my $api_url = Mojo::URL->new('https://web.archive.org/cdx/search/cdx')->query(
+        {
+            url    => $url,
+            output => 'json',
+            filter => 'statuscode:200',
+            limit  => 1,
+        }
+    );
+
+    my $response;
+    try {
+        $response = $self->{ua}->get($api_url)->result;
+    }
+    catch ($e) {
+        return ( $archive_cache{$url} = undef );
+    }
+
+    return ( $archive_cache{$url} = undef ) unless ( $response and $response->code == 200 );
+
+    my $data = eval { decode_json( $response->body ) };
+    return ( $archive_cache{$url} = undef ) unless ( ref($data) eq 'ARRAY' and @$data > 1 );
+
+    my $row = $data->[1];
+    return ( $archive_cache{$url} = undef ) unless ( ref($row) eq 'ARRAY' and @$row >= 3 );
+
+    my $timestamp = $row->[1];
+    my $original  = $row->[2] || $url;
+    return ( $archive_cache{$url} = undef ) unless ($timestamp);
+
+    my $archive_url = Mojo::URL->new("https://web.archive.org/web/$timestamp/$original")->to_string;
+    return ( $archive_cache{$url} = $archive_url );
 }
 
 sub get_updated_list ( $self, $days = 7 ) {

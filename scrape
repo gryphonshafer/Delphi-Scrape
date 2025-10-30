@@ -3,7 +3,7 @@ use exact;
 
 use Digest::SHA 'sha1_hex';
 use File::Find 'find';
-use File::Path 'make_path';
+use File::Path qw( make_path remove_tree );
 use Util::CommandLine qw( options pod2usage );
 use YAML::XS qw( DumpFile LoadFile );
 
@@ -12,18 +12,21 @@ use lib "$FindBin::Bin";
 use Delphi;
 
 my $settings = options( qw(
-    username|user|u=s password|passwd|pass|p=s forum|f=s store|s=s lag|l=f refresh|r=s
+    username|user|u=s password|passwd|pass|p=s forum|f=s store|s=s lag|l=f refresh|r=s clean!
 ) );
 
 # input validation
 pod2usage( '-verbose' => 1 ) if ( $settings->{'help'} );
+my $has_credentials = scalar grep {
+    defined $settings->{$_} and length $settings->{$_}
+} qw( username password forum );
+my $clean_only = $settings->{clean} && !$has_credentials;
+
 pod2usage(
     '-exitstatus' => 2,
     '-verbose'    => 0,
-    '-msg'        => 'Not all required fields properly defined',
-) if ( scalar grep { not (
-    defined $settings->{$_} and length $settings->{$_}
-) } qw( username password forum ) );
+    '-msg'        => 'Not all required fields properly defined (use --clean to clear existing data without scraping)',
+) if ( not $clean_only and $has_credentials < 3 );
 
 $SIG{__WARN__} = sub {
     die join( "\n",
@@ -37,7 +40,22 @@ $SIG{__WARN__} = sub {
 $settings->{lag}   //= 1.5;
 $settings->{store} //= 'store';
 
+if ( $settings->{clean} ) {
+    for my $path (
+        map { $settings->{store} . '/' . $_ }
+        qw( threads profiles files )
+    ) {
+        next unless ( -d $path );
+        remove_tree( $path, { keep_root => 1 } );
+    }
+}
+
 make_path( $settings->{store} . '/' . $_ ) for ( qw( threads profiles files ) );
+
+if ($clean_only) {
+    say 'Store cleaned.';
+    exit 0;
+}
 
 if ( $settings->{refresh} and $settings->{refresh} =~ /[A-z]/ ) {
     my @mtimes;
@@ -194,6 +212,12 @@ Print a brief help message and exits.
 =item B<-man>
 
 Prints the manual page and exits.
+
+=item B<-clean>
+
+Remove existing files from the threads/profiles/files subdirectories under the
+store path before scraping. Handy when you want to start from a fresh export of
+the forum. Directories themselves are kept in place.
 
 =back
 
