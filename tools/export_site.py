@@ -540,7 +540,7 @@ def format_name_html(
     primary_class: str,
     status: Optional[str] = None,
 ) -> str:
-    raw = (name or "").strip()
+    raw = (str(name) if name is not None else "").strip()
     local_status = status
     if not raw:
         primary = "Unknown"
@@ -903,7 +903,7 @@ def build_profile_lookup(profiles_dir: Path) -> Dict[str, Mapping]:
 def profile_key_from_name(name: Optional[str]) -> Optional[str]:
     if not name:
         return None
-    return name.replace("/", "_")
+    return str(name).replace("/", "_")
 
 
 def describe_profile(profile: Optional[Mapping]) -> str:
