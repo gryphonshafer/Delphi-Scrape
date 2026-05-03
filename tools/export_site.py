@@ -783,7 +783,7 @@ def render_folder_html(
             thread_id = html.escape(str(thread.get("id")))
             title = html.escape(thread.get("title") or f"Thread {thread_id}")
             first_date = format_folder_date(thread.get("first_date"))
-            author = html.escape(thread.get("first_author") or "Unknown")
+            author = html.escape(str(thread.get("first_author")) or "Unknown")
             replies = max(thread.get("message_count", 0) - 1, 0)
             link = f'../threads/{thread["id"]}.html'
             rows.append(
